@@ -21,7 +21,8 @@ def home():
     return "Bot is running 24/7!"
 
 def run_web_server():
-    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 8080)))
+    port = int(os.environ.get('PORT', 8080))
+    app.run(host='0.0.0.0', port=port)
 
 # ==================== 3. فحص الاشتراك الإجباري ====================
 def is_subscribed(user_id):
@@ -29,7 +30,8 @@ def is_subscribed(user_id):
         member = bot.get_chat_member(CHANNEL_ID, user_id)
         return member.status in ['creator', 'administrator', 'member']
     except Exception as e:
-        print(f"Subscription Check Error: {e}")
+        print(f"❌ خطأ أثناء فحص الاشتراك: {e}")
+        # في حال وجود خطأ يتيح للمستخدم المرور لكي لا يتوقف البوت عن الرد
         return True
 
 def send_subscription_message(chat_id):
@@ -48,6 +50,7 @@ def send_subscription_message(chat_id):
 # ==================== 4. معالجة الأوامر والرسائل ====================
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
+    print(f"📩 استلمت أمر /start من المستخدم: {message.from_user.id}")
     user_id = message.from_user.id
     if not is_subscribed(user_id):
         send_subscription_message(message.chat.id)
@@ -67,11 +70,12 @@ def callback_check_sub(call):
     else:
         bot.answer_callback_query(call.id, "❌ لم تشترك بعد! يرجى الانضمام للقناة أولاً.", show_alert=True)
 
-# ==================== 5. معالجة روابط الفيديو وتجاوز القيود ====================
+# ==================== 5. معالجة روابط الفيديو ====================
 @bot.message_handler(func=lambda msg: msg.text and msg.text.startswith(("http://", "https://")))
 def handle_download(message):
     user_id = message.from_user.id
     url = message.text.strip()
+    print(f"🔗 استلمت رابط للتحميل: {url}")
 
     if not is_subscribed(user_id):
         send_subscription_message(message.chat.id)
@@ -119,7 +123,7 @@ def handle_download(message):
         bot.delete_message(message.chat.id, status_msg.message_id)
 
     except Exception as e:
-        print(f"Download Error: {e}")
+        print(f"❌ Download Error: {e}")
         bot.edit_message_text(
             "❌ حدث خطأ أثناء تحميل الفيديو.\n"
             "تأكد من صحة الرابط أو حاول مجدداً لاحقاً.",
@@ -130,107 +134,5 @@ def handle_download(message):
 # ==================== 6. تشغيل السيرفر والبوت ====================
 if __name__ == "__main__":
     threading.Thread(target=run_web_server, daemon=True).start()
-    print("Bot starting...")
-    bot.infinity_polling(skip_pending=True)
-    btn_channel = InlineKeyboardButton("📢 اشترك في القناة", url=CHANNEL_URL)
-    btn_confirm = InlineKeyboardButton("✅ تأكيد الاشتراك", callback_data="check_sub")
-    markup.add(btn_channel)
-    markup.add(btn_confirm)
-    
-    bot.send_message(
-        chat_id,
-        "⚠️ **عذراً عزيزي!**\n\nيجب عليك الاشتراك في قناة البوت الرسمية لاستخدام الخدمة.",
-        parse_mode="Markdown",
-        reply_markup=markup
-    )
-
-# ==================== 4. معالجة الأوامر والرسائل ====================
-@bot.message_handler(commands=['start'])
-def start_cmd(message):
-    user_id = message.from_user.id
-    if not is_subscribed(user_id):
-        send_subscription_message(message.chat.id)
-        return
-    
-    bot.reply_to(
-        message,
-        "👋 **أهلاً بك في بوت التحميل الشامل (@VideoHubDownloader_bot)!**\n\n"
-        "أرسل لي رابط الفيديو من أي منصة (يوتيوب، تيك توك، إنستغرام، إلخ) وسأقوم بتحميله لك مباشرة.",
-        parse_mode="Markdown"
-    )
-
-@bot.callback_query_handler(func=lambda call: call.data == "check_sub")
-def callback_check_sub(call):
-    if is_subscribed(call.from_user.id):
-        bot.answer_callback_query(call.id, "✅ تم التأكد، يمكنك الآن استخدام البوت!")
-        bot.send_message(call.message.chat.id, "أرسل لي رابط الفيديو الآن 🚀")
-    else:
-        bot.answer_callback_query(call.id, "❌ لم تشترك بعد! يرجى الانضمام للقناة أولاً.", show_alert=True)
-
-# ==================== 5. معالجة روابط الفيديو وتجاوز القيود ====================
-@bot.message_handler(func=lambda msg: msg.text and msg.text.startswith(("http://", "https://")))
-def handle_download(message):
-    user_id = message.from_user.id
-    url = message.text.strip()
-
-    if not is_subscribed(user_id):
-        send_subscription_message(message.chat.id)
-        return
-
-    status_msg = bot.reply_to(message, "⏳ **جاري معالجة الرابط وتجاوز قيود التحميل...**", parse_mode="Markdown")
-
-    ydl_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': f'downloads/{user_id}_%(id)s.%(ext)s',
-        'quiet': True,
-        'no_warnings': True,
-    }
-
-    if os.path.exists("cookies.txt"):
-        ydl_opts['cookiefile'] = 'cookies.txt'
-
-    if PROXY_URL:
-        ydl_opts['proxy'] = PROXY_URL
-
-    try:
-        os.makedirs("downloads", exist_ok=True)
-        
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            file_path = ydl.prepare_filename(info)
-            title = info.get('title', 'فيديو')
-
-        bot.edit_message_text("⬆️ **جاري رفع الفيديو إلى تلغرام...**", message.chat.id, status_msg.message_id, parse_mode="Markdown")
-
-        markup = InlineKeyboardMarkup()
-        btn_channel = InlineKeyboardButton("📢 القناة الرسمية", url=CHANNEL_URL)
-        markup.add(btn_channel)
-
-        with open(file_path, 'rb') as video_file:
-            bot.send_video(
-                message.chat.id,
-                video_file,
-                caption=f"🎬 **{title}**\n\n🤖 تم التحميل بواسطة @VideoHubDownloader_bot",
-                parse_mode="Markdown",
-                reply_markup=markup
-            )
-
-        if os.path.exists(file_path):
-            os.remove(file_path)
-        bot.delete_message(message.chat.id, status_msg.message_id)
-
-    except Exception as e:
-        print(f"Download Error: {e}")
-        bot.edit_message_text(
-            "❌ **حدث خطأ أثناء تحميل الفيديو.**\n"
-            "تأكد من صحة الرابط أو حاول مجدداً لاحقاً.",
-            message.chat.id,
-            status_msg.message_id,
-            parse_mode="Markdown"
-        )
-
-# ==================== 6. تشغيل السيرفر والبوت ====================
-if __name__ == "__main__":
-    threading.Thread(target=run_web_server, daemon=True).start()
-    print("Bot starting...")
+    print("🚀 Bot starting polling...")
     bot.infinity_polling(skip_pending=True)
